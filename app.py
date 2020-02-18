@@ -1,4 +1,4 @@
-import os, sys, logging
+import os, sys, logging, io
 from logging import handlers
 from configparser import ConfigParser
 from requests import Session
@@ -6,6 +6,9 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 
 class App:
+
+    MSG_FORM = "\n지금 살 수 있다고 합니다~\n▶ {dsc}\n▶ 가격 : {price}\n▶ 바로가기 : {url}"
+
     def __init__(self, WD):
         self.WD = WD
         self._logger = self.initLogger()
@@ -42,10 +45,21 @@ class App:
     def _extractItems(soup):
         return soup.find_all('div', class_='box')
 
+    # - 이미지 추출 함수
+    @staticmethod
+    def _getPhoto(url):
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.106 Safari/537.36"
+        }
+        response = Session().get(url, headers=headers)
+        if response.status_code != 200:
+            raise Exception('Something Wrong your image..')
+
+        return response.content
     # - 메세지 포매팅 후 반환
     @staticmethod
-    def _msg(item):
-        pass
+    def _msg(dsc=None, price=None, url=None):
+        return App.MSG_FORM.format(dsc=dsc, price=price, url=url)
 
 
 
@@ -73,14 +87,11 @@ class App:
         parser.read(file, encoding='utf-8-sig')
         self._conf = parser
 
-
-
-
-
-
+    # - 짧은 URL로 변환
     def _shortURL(self, url):
         if not self._conf:
             self._initConf()
+
         NAVER = self._conf['naverAPI']
         response = Session().post(
             NAVER['URL'],
@@ -99,15 +110,30 @@ class App:
 
         return response.json()['result']['url']
 
+    # - 라인 Notify 메세지 전송
+    def _sendNotify(self, item):
+        if not self._conf:
+            self._initConf()
+
+        url = self._conf['default']['HOST'] + item['link']  # original URL
+        message = self._msg(item['dsc'], item['price'], self._shortURL(url))  # message
+
+        img = self._conf['default']['HOST'] + item['img']  # image URL
+        imageFile = io.BytesIO(self._getPhoto(img))
+
+        TARGET_URL = self._conf['notify']['URL']
+        TOKEN = self._conf['notify']['TOKEN']
+
+        headers = {'Authorization': 'Bearer {TOKEN}'.format(TOKEN=TOKEN)}
+        data = {'message': message}
+        files = {'imageFile': imageFile}
+
+        response = Session().post(TARGET_URL, headers=headers, data=data, files=files)
 
 
 
 
-
-
-
-
-
+    # - 크롤링
     def _crawl(self):
         if not self._conf:
             self._initConf()
@@ -142,6 +168,7 @@ class App:
                 continue
             else:
                 selling = self._parse(item)
+                self._sendNotify(selling)
 
 
 if __name__ == '__main__':
