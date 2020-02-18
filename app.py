@@ -8,29 +8,14 @@ from selenium import webdriver
 class App:
     def __init__(self, WD):
         self.WD = WD
-        self._logger = App.initLogger(WD)
+        self._logger = self.initLogger()
         self._conf = None
         self._items = None
 
         self._logger.info('Start MaskBot !!!')
 
-    @staticmethod
-    def initLogger(WD):
-        log_dir = os.path.join(WD, 'logs')
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
 
-        logger = logging.getLogger('MaskBot')
-        logger.setLevel(logging.INFO)
-        fmt = logging.Formatter('[%(levelname)s|%(filename)s:%(lineno)s] %(asctime)s - %(message)s')
-        f_handler = handlers.RotatingFileHandler(os.path.join(log_dir, 'coronachk.log'), 'a', 10 * 1024 * 1024, 5)
-        f_handler.setFormatter(fmt)
-        logger.addHandler(f_handler)
-        return logger
 
-    @staticmethod
-    def _msg(item):
-        pass
 
     # - 품절 체크
     @staticmethod
@@ -57,16 +42,75 @@ class App:
     def _extractItems(soup):
         return soup.find_all('div', class_='box')
 
-    def _load_conf(self, file_name='app.conf'):
+    # - 메세지 포매팅 후 반환
+    @staticmethod
+    def _msg(item):
+        pass
+
+
+
+    # - 로거 초기화
+    def initLogger(self):
+        log_dir = os.path.join(self.WD, 'logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        logger = logging.getLogger('MaskBot')
+        logger.setLevel(logging.INFO)
+        fmt = logging.Formatter('%(asctime)s - [%(levelname)s|%(filename)s:%(lineno)s] - %(message)s')
+        st_handler = logging.StreamHandler()
+        f_handler = handlers.RotatingFileHandler(os.path.join(log_dir, 'maskchk.log'), 'a', 10 * 1024 * 1024, 5)
+        st_handler.setFormatter(fmt)
+        f_handler.setFormatter(fmt)
+        logger.addHandler(st_handler)
+        logger.addHandler(f_handler)
+        return logger
+
+    # - 환경설정 파일 초기화
+    def _initConf(self, file_name='app.conf'):
         file = os.path.join(self.WD, file_name)
         parser = ConfigParser()
         parser.read(file, encoding='utf-8-sig')
         self._conf = parser
 
 
+
+
+
+
+    def _shortURL(self, url):
+        if not self._conf:
+            self._initConf()
+        NAVER = self._conf['naverAPI']
+        response = Session().post(
+            NAVER['URL'],
+            headers={
+                'X-Naver-Client-Id': NAVER['clientID'],
+                'X-Naver-Client-Secret': NAVER['clientSecret']
+            },
+            data={
+                'url': url.encode('utf-8')
+            }
+        )
+
+        if response.json()['code'] != '200':
+            self._logger.warning('Trans short url is fail..')
+            return url
+
+        return response.json()['result']['url']
+
+
+
+
+
+
+
+
+
+
     def _crawl(self):
         if not self._conf:
-            self._load_conf()
+            self._initConf()
 
         try:
             url = self._conf['default']['url']
@@ -97,14 +141,14 @@ class App:
             if self._isSoldOut(item):
                 continue
             else:
-                result = self._parse(item)
-                print(result)
+                selling = self._parse(item)
+
 
 if __name__ == '__main__':
     WD = os.path.dirname(os.path.realpath(__file__))
     app = App(WD)
     app.run()
-
+    # print(app.shortURL('http://www.welkeepsmall.com/shop/shopbrand.html?type=X&xcode=007'))
 # 1 페이지 내의 모든 아이템을 읽어서
 
 # 2 품절인지 판단을 하고
