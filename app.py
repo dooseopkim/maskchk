@@ -1,6 +1,5 @@
 import os
 import sys
-import io
 import requests
 import logging, logging.handlers
 
@@ -11,8 +10,9 @@ from configparser import ConfigParser
 class App:
 
 
-    def __init__(self, WD):
+    def __init__(self, WD, TYPE):
         self.WD = WD
+        self.TYPE = TYPE
         self._logger = None
         self._conf = None
         self._items = None
@@ -51,7 +51,7 @@ class App:
         }
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
-            raise Exception('Something Wrong your image..')
+            raise Exception(response.text)
 
         return response.content
 
@@ -91,7 +91,10 @@ class App:
 
     # - 짧은 URL로 변환
     def _shortURL(self, url):
+        origin_url = self._conf['default']['HOST'] + url
         try:
+            self._logger.info('Call API Naver shortURL')
+
             NAVER = self._conf['naverAPI']
             response = requests.post(
                 NAVER['URL'],
@@ -100,55 +103,71 @@ class App:
                     'X-Naver-Client-Secret': NAVER['clientSecret']
                 },
                 data={
-                    'url': url.encode('utf-8')
+                    'url': origin_url.encode('utf-8')
                 }
             )
 
             if response.json()['code'] != '200':
-                raise Exception('Trans short url is fail..')
+                raise Exception(response.json()['message'])
 
             return response.json()['result']['url']
 
         except Exception as e:
             self._logger.warning(e)
-            return url
+            return origin_url
 
 
     # - 라인 Notify 메세지 전송
-    def _sendNotify(self, item):
+    def _sendNotify(self, messages):
         try:
-            url = self._conf['default']['HOST'] + item['link']  # original URL
-            message = self._msg(item['dsc'], item['price'], self._shortURL(url))  # message
-
-            # img = self._conf['default']['HOST'] + item['img']  # image URL
-            imageFile = io.BytesIO(self._getPhoto(item['img']))
-
+            self._logger.info('Send Line notification')
             TARGET_URL = self._conf['notify']['URL']
             TOKEN = self._conf['notify']['TOKEN']
 
+            message = '\n==========================\n'.join(messages)
+
             headers = {'Authorization': 'Bearer {TOKEN}'.format(TOKEN=TOKEN)}
             data = {'message': message}
-            files = {'imageFile': imageFile}
 
-            response = requests.post(TARGET_URL, headers=headers, data=data, files=files)
+            response = requests.post(TARGET_URL, headers=headers, data=data)
+
+            if response.status_code != 200:
+                raise Exception(response.text)
         except Exception as e:
             self._logger.error(e)
 
     # - 크롤링
     def _crawl(self):
         try:
-            TARGET_URL = self._conf['default']['url']
+            TARGET_URL = self._conf['default']['BBS']
             headers={
                 "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.106 Safari/537.36"
             }
 
-            response = requests.get(TARGET_URL, headers=headers)
+            xcode = ''
+            if self.TYPE == 'cool':
+                # 쿨패치
+                xcode = '007'
+            elif self.TYPE == 'hot':
+                # 핫팩
+                xcode = '002'
+            else:
+                # 마스크
+                xcode = '023'
+            params = {'type': 'x', 'xcode': xcode}
+
+            response = requests.get(TARGET_URL, headers=headers, params=params)
             response.encoding = None # ISO-8859-1 (euc-kr)
+
+            self._logger.info('Crawling... {}'.format(response.url))
+
             if response.status_code != 200:
                 raise Exception("Wrong page.. Check your URL")
 
             html = response.text
             soup = BeautifulSoup(html, 'lxml')
+
+            # Extract divs of item
             self._items = App._extractItems(soup)
 
         except Exception as e:
@@ -156,35 +175,55 @@ class App:
 
 
     def run(self):
-        # List of message for send notification
-        messages = []
+        try:
+            # List of message for send notification
+            messages = ['\n==========================\n\n현재 구입 가능한 상품\n']
 
-        # Initialize
-        self._initLogger()
-        self._initConf()
+            # Initialize
+            self._initLogger()
+            self._initConf('_app.conf')
 
-        # Crawling
-        self._crawl()
+            self._logger.info('Start process')
 
-        # Check Soldout
-        selling_items = [item for item in self._items if not self._isSoldOut(item)]
-        print(selling_items)
-        # # Check soldout
-        # for item in self._items:
-        #     if self._isSoldOut(item):
-        #         continue
-        #     else:
-        #         selling = self._parse(item)
-        #         self._sendNotify(selling)
+            # Crawling
+            self._crawl()
+
+            # Check Soldout
+            selling_items = [item for item in self._items if not self._isSoldOut(item)]
+            self._logger.info('Check available for purchase : {} items.'.format(len(selling_items)))
+
+            # If no item, sys exit
+            if len(selling_items) == 0:
+                sys.exit()
+
+            for item in selling_items:
+                item_ = self._parse(item)
+
+                dsc_ = item_.get('dsc')
+                price_ = item_.get('price')
+                link_ = self._shortURL(item_.get('link'))
+                message = self._msg(dsc_, price_, link_)
+                messages.append(message)
+
+            # - Send notification
+            self._sendNotify(messages)
+
+        except Exception as e:
+            _, _, tb = sys.exc_info()
+            self._logger.error('line : {}\n{}'.format(tb.tb_lineno, e))
+        finally:
+            self._logger.info('End Process')
+
+
+def main():
+    WD = os.path.dirname(os.path.realpath(__file__))
+    if len(sys.argv) >= 2:
+        TYPE = sys.argv[1]
+    else:
+        TYPE = 'mask'
+    app = App(WD, TYPE)
+    app.run()
 
 
 if __name__ == '__main__':
-    WD = os.path.dirname(os.path.realpath(__file__))
-    app = App(WD)
-    app.run()
-    # print(app.shortURL('http://www.welkeepsmall.com/shop/shopbrand.html?type=X&xcode=007'))
-# 1 페이지 내의 모든 아이템을 읽어서
-
-# 2 품절인지 판단을 하고
-
-# 3 품절이 아니면 notify로  알림을 보내주자.
+    main()
