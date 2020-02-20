@@ -182,7 +182,7 @@ class App:
 
             # Initialize
             self._initLogger()
-            self._initConf('_app.conf')
+            self._initConf()
 
             self._logger.info('Start process')
 
