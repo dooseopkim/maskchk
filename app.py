@@ -33,7 +33,6 @@ class App:
     def _parse(item):
         return {
             'link': item.find('div', class_='thumb').find('a')['href'],
-            "img": item.find('div', class_='thumb').find('img')['src'],
             'dsc': item.find('ul', class_='info').find('li', class_='dsc').text,
             'price': item.find('ul', class_='info').find('li', class_='price').text
         }
@@ -41,7 +40,10 @@ class App:
     # - 페이지 내 제품 정보 추출
     @staticmethod
     def _extractItems(soup):
-        return soup.find_all('div', class_='box')
+        divs = soup.find_all('div', class_='box')
+        if len(divs) == 0:
+            raise Exception("Website is down..")
+        return divs
 
     # - 이미지 추출 함수
     @staticmethod
@@ -144,7 +146,6 @@ class App:
                 "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.106 Safari/537.36"
             }
 
-            xcode = ''
             if self.TYPE == 'cool':
                 # 쿨패치
                 xcode = '007'
@@ -210,7 +211,7 @@ class App:
 
         except Exception as e:
             _, _, tb = sys.exc_info()
-            self._logger.error('line : {}\n{}'.format(tb.tb_lineno, e))
+            self._logger.error('line : {} - {}'.format(tb.tb_lineno, e))
         finally:
             self._logger.info('End Process')
 
